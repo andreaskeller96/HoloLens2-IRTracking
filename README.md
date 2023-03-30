@@ -15,7 +15,7 @@ This project makes use of a number of awesome open source libraries, including:
 
 ## License and Citation
 
-If you use this project or the library contained within in your research, please reference this repository as well as the original STTAR paper:
+If you use this project in your research, please reference this repository as well as the original STTAR paper:
 
 A. Martin-Gomez et al., "STTAR: Surgical Tool Tracking using Off-the-Shelf Augmented Reality Head-Mounted Displays," in IEEE Transactions on Visualization and Computer Graphics, doi: 10.1109/TVCG.2023.3238309.
 
