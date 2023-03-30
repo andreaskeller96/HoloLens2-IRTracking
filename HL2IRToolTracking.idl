@@ -1,0 +1,24 @@
+namespace HL2IRToolTracking
+{
+    runtimeclass HL2IRTracking
+    {
+        HL2IRTracking();
+
+        void SetReferenceCoordinateSystem(Windows.Perception.Spatial.SpatialCoordinateSystem refCoord);
+     
+        Boolean IsTrackingTools();
+
+        Boolean AddToolDefinition(Int32 sphere_count, Single[] sphere_positions, Single sphere_radius, String identifier);
+        Boolean RemoveToolDefinition(String identifier);
+        Boolean RemoveAllToolDefinitions();
+
+
+        Boolean StartToolTracking();
+        void StopToolTracking();
+
+
+        Single[] GetToolTransform(String identifier);
+        Int64 GetTrackingTimestamp();
+
+    }
+}
