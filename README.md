@@ -15,9 +15,17 @@ This project makes use of a number of awesome open source libraries, including:
 
 ## License and Citation
 
-If you use this project in your research, please reference this repository as well as the original STTAR paper:
+If you use this project, please cite the following BibTeX entries:
 
-A. Martin-Gomez et al., "STTAR: Surgical Tool Tracking using Off-the-Shelf Augmented Reality Head-Mounted Displays," in IEEE Transactions on Visualization and Computer Graphics, doi: 10.1109/TVCG.2023.3238309.
+```BibTeX
+@misc{keller2023hl2irtracking,
+  author =       {Andreas Keller},
+  title =        {HoloLens 2 Infrared Retro-Reflector Tracking},
+  howpublished = {\url{https://github.com/andreaskeller96/HoloLens2-IRTracking}},
+  year =         {2023}
+}
+```
+A. Keller, HoloLens 2 Infrared Retro-Reflector Tracking. https://github.com/andreaskeller96/HoloLens2-IRTracking, 2023. [Online]. Available: https://github.com/andreaskeller96/HoloLens2-IRTracking
 
 ```bibtex
 @ARTICLE{10021890,
@@ -31,3 +39,4 @@ A. Martin-Gomez et al., "STTAR: Surgical Tool Tracking using Off-the-Shelf Augme
   doi={10.1109/TVCG.2023.3238309}}
 
 ```
+A. Martin-Gomez et al., “STTAR: Surgical Tool Tracking using Off-the-Shelf Augmented Reality Head-Mounted Displays,” IEEE Transactions on Visualization and Computer Graphics, pp. 1–16, 2023, doi: 10.1109/TVCG.2023.3238309.
