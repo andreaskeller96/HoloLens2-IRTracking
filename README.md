@@ -8,8 +8,8 @@ This project contains the source code for tracking passive IR sphere markers usi
 * Simultaneous tracking of multiple markers (tested with up to 5, can theoretically support a lot more)
 * Support for partial marker occlusion - define marker arrays with 4 or more fiducials, keep tracking even when some are occluded (min. 3 visible at all times)
 * Support for spherical markers and flat marker stickers
-* Support for different marker times tracked simultaneously
-* Filter 3D sphere world positions using Kalman Filters
+* Support for different marker types and sphere diameters to be tracked simultaneously
+* Filter 3D fiducial world positions using Kalman Filters
 * Filter marker array world position and rotation using low-pass filtering
 
 
