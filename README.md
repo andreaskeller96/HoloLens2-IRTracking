@@ -6,7 +6,7 @@ This project contains the source code for tracking passive IR sphere markers usi
 ## Features
 * Easy-to-use tracking of retro-reflective marker arrays using the HoloLens 2 research mode
 * Simultaneous tracking of multiple markers (tested with up to 5, can theoretically support a lot more)
-* Support for partial marker occlusion - define marker arrays with 4 or more spheres, keep tracking even when some are occluded (min. 3 visible at all times)
+* Support for partial marker occlusion - define marker arrays with 4 or more fiducials, keep tracking even when some are occluded (min. 3 visible at all times)
 * Support for spherical markers and flat marker stickers
 * Support for different marker times tracked simultaneously
 * Filter 3D sphere world positions using Kalman Filters
