@@ -154,7 +154,6 @@ namespace winrt::HL2IRToolTracking::implementation
         }
         return hr;
     }
-
     void HL2IRTracking::InitializeDepthSensor()
     {
         for (auto sensorDescriptor : m_sensorDescriptors)
@@ -435,6 +434,16 @@ namespace winrt::HL2IRToolTracking::implementation
 
     bool HL2IRTracking::AddToolDefinition(int sphere_count, array_view<const float> sphere_positions, float sphere_radius, hstring identifier)
     {
+        return AddToolDefinition(sphere_count, sphere_positions, sphere_radius, identifier, sphere_count, 0.3f, 0.6f);
+    }
+
+    bool HL2IRTracking::AddToolDefinition(int sphere_count, array_view<const float> sphere_positions, float sphere_radius, hstring identifier, int min_visible_spheres)
+    {
+        return AddToolDefinition(sphere_count, sphere_positions, sphere_radius, identifier, min_visible_spheres, 0.3f, 0.6f);
+    }
+
+    bool HL2IRTracking::AddToolDefinition(int sphere_count, array_view<const float> sphere_positions, float sphere_radius, hstring identifier, int min_visible_spheres, float lowpass_rotation, float lowpass_position)
+    {
         if (m_IRToolTracker == nullptr)
         {
             OutputDebugString(L"On Device Tracking First Initialization\n");
@@ -455,7 +464,7 @@ namespace winrt::HL2IRToolTracking::implementation
             j += 3;
         }
         OutputDebugString(L"On Device Tracking Constructed Tool.\n");
-        return m_IRToolTracker->AddTool(spheres, sphere_radius, to_string(identifier));
+        return m_IRToolTracker->AddTool(spheres, sphere_radius, to_string(identifier), min_visible_spheres, std::clamp(lowpass_rotation, 0.f, 1.f), std::clamp(lowpass_position, 0.f, 1.f));
     }
 
     bool HL2IRTracking::RemoveToolDefinition(hstring identifier)
@@ -469,7 +478,7 @@ namespace winrt::HL2IRToolTracking::implementation
     {
         if (m_IRToolTracker == nullptr)
             return false;
-        return m_IRToolTracker->RemoveAllToolDefinitions();
+        return m_IRToolTracker->RemoveAllTools();
     }
 
     bool HL2IRTracking::StartToolTracking()
@@ -531,5 +540,4 @@ namespace winrt::HL2IRToolTracking::implementation
         }
         return SUCCEEDED(m_pDepthCameraSensor->MapImagePointToCameraUnitPlane(uv, xy));
     }
-
 }

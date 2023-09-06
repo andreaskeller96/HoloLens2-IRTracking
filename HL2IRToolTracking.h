@@ -24,7 +24,6 @@
 #include <winrt/Windows.Foundation.h>
 
 #include <opencv2/core.hpp>
-#include <opencv2/aruco.hpp>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/imgcodecs/imgcodecs.hpp>
@@ -74,11 +73,14 @@ namespace winrt::HL2IRToolTracking::implementation
         float GetSpatialRfFps();
 
 
-        //On device IR Tool Tracking
+        
         void StartDepthSensorLoop();
 
+        //On device IR Tool Tracking
         bool IsTrackingTools();
         bool AddToolDefinition(int sphere_count, array_view<const float> sphere_positions, float sphere_radius, hstring identifier);
+        bool AddToolDefinition(int sphere_count, array_view<const float> sphere_positions, float sphere_radius, hstring identifier, int min_visible_spheres);
+        bool AddToolDefinition(int sphere_count, array_view<const float> sphere_positions, float sphere_radius, hstring identifier, int min_visible_spheres, float lowpass_rotation, float lowpass_position);
         bool RemoveToolDefinition(hstring identifier);
         bool RemoveAllToolDefinitions();
         bool StartToolTracking();
@@ -103,8 +105,12 @@ namespace winrt::HL2IRToolTracking::implementation
         Windows::Perception::Spatial::SpatialLocator m_locator = 0;
         Windows::Perception::Spatial::SpatialCoordinateSystem m_refFrame = nullptr;
         std::atomic_int m_depthBufferSize, m_shortAbImageBufferSize = 0;
+        std::atomic_int m_spatialBufferSize = 0;
 
         std::atomic_bool m_depthSensorLoopStarted = false;
+
+        std::atomic_bool m_LFImageUpdated = false;
+        std::atomic_bool m_RFImageUpdated = false;
         
 
         std::atomic_bool m_LUTGenerated_short = false;
@@ -118,8 +124,14 @@ namespace winrt::HL2IRToolTracking::implementation
         static void ImuAccessOnComplete(ResearchModeSensorConsent consent);
         std::string MatrixToString(DirectX::XMFLOAT4X4 mat);
         static DirectX::XMMATRIX HL2IRTracking::SpatialLocationToDxMatrix(Windows::Perception::Spatial::SpatialLocation location);
+        
         DirectX::XMFLOAT4X4 m_depthCameraPose;
         DirectX::XMMATRIX m_depthCameraPoseInvMatrix;
+        DirectX::XMFLOAT4X4 m_LFCameraPose;
+        DirectX::XMMATRIX m_LFCameraPoseInvMatrix;
+        DirectX::XMFLOAT4X4 m_RFCameraPose;
+        DirectX::XMMATRIX m_RFCameraPoseInvMatrix;
+
         
         std::thread* m_pDepthUpdateThread;
         

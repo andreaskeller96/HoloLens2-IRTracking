@@ -4,16 +4,13 @@
 #define DEBUG_OUTPUT FALSE
 #define DEBUG_TIME FALSE
 #define DEBUG_NO_FILTER FALSE
+#define DEBUG_OUTPUT_OCCL FALSE
 
-void IRToolTracker::StopTracking()
-{
-#if DEBUG_OUTPUT
-	OutputDebugString(L"StopTracking\n");
-#endif
-	m_bShouldStop = true;
-	//Wait until thread shuts down
-	m_TrackingThread.join();
-}
+
+#define DISABLE_LOWPASS FALSE
+#define DISABLE_KALMAN FALSE
+
+
 
 cv::Mat IRToolTracker::GetToolTransform(std::string identifier)
 {
@@ -21,13 +18,13 @@ cv::Mat IRToolTracker::GetToolTransform(std::string identifier)
 	std::string funcoutput = "GetToolTransform for " + identifier + "\n";
 	OutputDebugString(std::wstring(funcoutput.begin(), funcoutput.end()).c_str());
 #endif
-	if (m_CurToolTransforms.load() == nullptr || m_ToolIndexMapping.count(identifier) == 0)
+	if (m_Tools.size() == 0 || m_ToolIndexMapping.count(identifier) == 0)
 		return cv::Mat::zeros(8, 1, CV_32F);
 
 	auto it = m_ToolIndexMapping.find(identifier);
 	int index = it->second;
-	auto transform = m_CurToolTransforms.load()[index];
 
+	cv::Mat transform = m_Tools.at(index).cur_transform;
 	return transform;
 }
 
@@ -41,22 +38,20 @@ void IRToolTracker::TrackTools()
 		auto start = std::chrono::high_resolution_clock::now();
 #endif
 		m_bIsCurrentlyTracking = true;
-		
+		m_MutexCurFrame.lock();
 		if (m_CurrentFrame == nullptr) {
-			Sleep(10);
+			m_MutexCurFrame.unlock();
+			Sleep(5);
 			continue;
 		}
-		m_MutexCurFrame.lock();
+		
 		//Copy pointer to frame
 		AHATFrame* rawFrame = m_CurrentFrame;
 		m_CurrentFrame = nullptr;
 		m_MutexCurFrame.unlock();
+
 		int current_num_tools = m_Tools.size();
 		ToolResultContainer* raw_results = new ToolResultContainer[current_num_tools];
-		for (int i = 0; i < current_num_tools; i++) {
-			ToolResultContainer result{ i, std::vector<ToolResult>() };
-			raw_results[i] = result;
-		}
 
 		ProcessedAHATFrame processedFrame;
 
@@ -68,19 +63,25 @@ void IRToolTracker::TrackTools()
 		//std::vector<std::thread> tool_track_threads(current_num_tools);
 
 		for (int i = 0; i < current_num_tools; i++) {
-			IRToolDefinition tool = m_Tools.at(i);
-			TrackTool(tool, processedFrame, raw_results[i]);
-			//tool_track_threads.at(i) = std::thread(&NDIToolTracker::TrackTool, this, tool, FrameCurWorkingOn, raw_results[i]);
+			IRTrackedTool tool = m_Tools.at(i);
+			if (!tool.tracking_finished)
+				continue;
+
+			ToolResultContainer result{ i, std::vector<ToolResult>() };
+			
+			//tool_track_threads.at(i) = std::thread(&IRToolTracker::TrackTool, this, tool, processedFrame, result);
+			TrackTool(tool, processedFrame, result);
+			raw_results[i] = result;
+			//ProcessEnvFrame(processedFrame, result);
 		}
 
 		//for (auto & thread : tool_track_threads) {
 		//	thread.join();
 		//}
-		auto result = UnionSegmentation(raw_results, current_num_tools, processedFrame);
-		auto old_result = m_CurToolTransforms.load();
-		m_CurToolTransforms.store(result);
-		delete[] old_result;
+		UnionSegmentation(raw_results, current_num_tools, processedFrame);
+
 		delete[] raw_results;
+		//TODO: make sure i didnt create a memory leak here
 
 #if DEBUG_TIME
 		auto finish = std::chrono::high_resolution_clock::now();
@@ -94,108 +95,205 @@ void IRToolTracker::TrackTools()
 	m_bIsCurrentlyTracking = false;
 }
 
-void IRToolTracker::TrackTool(IRToolDefinition tool, ProcessedAHATFrame frame, ToolResultContainer& result)
+void IRToolTracker::TrackTool(IRTrackedTool &tool, ProcessedAHATFrame &frame, ToolResultContainer &result)
 {
+	tool.tracking_finished = false;
 #if DEBUG_OUTPUT
 	OutputDebugString(L"TrackTool\n");
 #endif
-	if (frame.num_spheres < tool.num_spheres) {
+	if (frame.num_spheres < tool.min_visible_spheres) {
 		//Not enough spheres for the tool are available
+		tool.tracking_finished = true;
 		return;
 	}
 	std::vector<Side> eligible_sides;
-	std::vector<int> eligible_sides_indices;
-	float tool_first_size_length = tool.map.at<float>(0, 1);
+	
 
 	auto it_sides = frame.ordered_sides_per_mm.find(tool.sphere_radius);
-	auto frame_ordered_sides = it_sides->second;
+	std::vector<Side> frame_ordered_sides = it_sides->second;
 
 	auto it_map = frame.map_per_mm.find(tool.sphere_radius);
-	auto frame_map = it_map->second;
+	cv::Mat frame_map = it_map->second;
+
 	//Find the set of eligible side to start with - aka sides that have similar length to first side of tool
-	for (int i = 0; i < frame_ordered_sides.size(); i++) {
-		Side s = frame_ordered_sides.at(i);
 
-		if (cv::abs(s.distance - tool_first_size_length) < m_fToleranceSide) {
-			eligible_sides.push_back(s);
-			eligible_sides_indices.push_back(i);
-		}
-	}
-	if (eligible_sides.size() == 0)
-		return;
+	struct search_entry {
+		std::vector<int> visited_nodes_frame;
+		float combined_error{ 0 };
+		int num_sides{ 0 };
+		std::vector<int> occluded_nodes_tool;
+	};
 
-	std::vector<std::tuple<std::vector<int>, float, int>> search_list;
+	std::vector<search_entry> search_list;
 
-	//From the start sides, add each direction to search queue
-	for (Side s : eligible_sides)
+	float cur_side_length = tool.map.at<float>(0, 1);
+	std::vector<int> hidden_nodes;
+	int max_occluded_spheres = tool.num_spheres - tool.min_visible_spheres;
+#if DEBUG_OUTPUT_OCCL
+	OutputDebugString(L"Searching Tool ");
+	//std::stringstream result_string;
+	//std::copy(curr.occluded_nodes_tool.begin(), curr.occluded_nodes_tool.end(), std::ostream_iterator<int>(result_string, " "));
+	std::string my_str = tool.identifier + ": Max occl " + std::to_string(max_occluded_spheres);
+	OutputDebugString(std::wstring(my_str.begin(), my_str.end()).c_str());
+	OutputDebugString(L"\n");
+#endif
+	for (int m = 0; m <= max_occluded_spheres; m++)
 	{
+		std::vector<int> hidden_nodes_inside;
+		for (int k = m+1; k <= max_occluded_spheres+1; k++)
+		{
+#if DEBUG_OUTPUT_OCCL
+			OutputDebugString(L"Checking Tool ");
+			std::string my_str = tool.identifier + " for eligible side: " + std::to_string(m) + " to " + std::to_string(k);
+			OutputDebugString(std::wstring(my_str.begin(), my_str.end()).c_str());
+			OutputDebugString(L"\n");
+#endif
+			
+			cur_side_length = tool.map.at<float>(m, k);
+			for (int i = 0; i < frame_ordered_sides.size(); i++) {
+				Side s = frame_ordered_sides.at(i);
+				if (cv::abs(s.distance - cur_side_length) < m_fToleranceSide) {
+					eligible_sides.push_back(s);
+#if DEBUG_OUTPUT_OCCL
+					OutputDebugString(L"Found Eligible side for Tool ");
+					std::string my_str = tool.identifier + ": " + std::to_string(m) + " to " + std::to_string(k);
+					OutputDebugString(std::wstring(my_str.begin(), my_str.end()).c_str());
+					OutputDebugString(L"\n");
+#endif
+				}
+			}
+			if (eligible_sides.size() == 0 && max_occluded_spheres == 0)
+			{
+				tool.tracking_finished = true;
+				return;
+			}
+			if (eligible_sides.size() != 0)
+			{
+				for (int occl_nodes = m+1; occl_nodes < k; occl_nodes++)
+				{
+					hidden_nodes_inside.push_back(occl_nodes);
+				}
+				break;
+			}
+		}
+		if (eligible_sides.size() == 0 && max_occluded_spheres == 0)
+		{
+			tool.tracking_finished = true;
+			return;
+		}
 
-		std::tuple<std::vector<int>, float, int> forward(std::vector<int>{s.id_from, s.id_to}, s.distance - tool_first_size_length, 1);
-		std::tuple<std::vector<int>, float, int> backward(std::vector<int>{s.id_to, s.id_from}, s.distance - tool_first_size_length, 1);
-		search_list.push_back(forward);
-		search_list.push_back(backward);
+			
+		if (eligible_sides.size() != 0)
+		{
+			std::vector<int> all_hidden_nodes;
+			all_hidden_nodes.reserve(hidden_nodes.size() + hidden_nodes_inside.size());
+			all_hidden_nodes.insert(all_hidden_nodes.end(), hidden_nodes.begin(), hidden_nodes.end());
+			all_hidden_nodes.insert(all_hidden_nodes.end(), hidden_nodes_inside.begin(), hidden_nodes_inside.end());
+			if (!(all_hidden_nodes.size() > max_occluded_spheres))
+			{
+				//From the start sides, add each direction to search queue
+				for (Side s : eligible_sides)
+				{
+					search_entry forward{ std::vector<int>{s.id_from, s.id_to}, cv::abs(s.distance - cur_side_length), 1, std::vector<int>{all_hidden_nodes} };
+					search_entry backward{ std::vector<int>{s.id_to, s.id_from}, cv::abs(s.distance - cur_side_length), 1, std::vector<int>{all_hidden_nodes} };
+					search_list.push_back(backward);
+					search_list.push_back(forward);
+				}
+			}
+
+			
+			eligible_sides.clear();
+		}
+		hidden_nodes.push_back(m);
 	}
 
 	while (search_list.size() > 0) {
-		auto curr = search_list.at(0);
-		search_list.erase(search_list.begin());
-		std::vector<int> searched_ids = std::get<0>(curr);
-		float error_searched = std::get<1>(curr);
-		int num_searched = searched_ids.size();
+		search_entry curr = search_entry{ search_list.back() };
+		search_list.pop_back();
 
-		if (searched_ids.size() == tool.num_spheres) {
+		if (curr.occluded_nodes_tool.size() <= (max_occluded_spheres) &&
+			 curr.visited_nodes_frame.size() == (tool.num_spheres - curr.occluded_nodes_tool.size())) {
 			ToolResult r{};
-			r.error = error_searched;
-			r.sphere_ids = searched_ids;
-			if (error_searched / std::get<2>(curr))
+			r.error = curr.combined_error;
+			r.sphere_ids = curr.visited_nodes_frame;
+			r.occluded_nodes = curr.occluded_nodes_tool;
+			if ((curr.combined_error / (curr.num_sides))<m_fToleranceAvg)
+			{
+#if DEBUG_OUTPUT_OCCL
+				OutputDebugString(L"Found Candidate for Tool ");
+				std::stringstream result_string;
+				std::copy(curr.occluded_nodes_tool.begin(), curr.occluded_nodes_tool.end(), std::ostream_iterator<int>(result_string, " "));
+				std::string my_str = tool.identifier + " with Occl Spheres: " + result_string.str();
+				OutputDebugString(std::wstring(my_str.begin(), my_str.end()).c_str());
+				OutputDebugString(L"\n");
+#endif
+				//r.dist_to_prev = 
 				result.candidates.push_back(r);
+			}
 			continue;
 		}
 
-		for (int i = 0; i < frame.num_spheres; i++) {
-			if (std::find(searched_ids.begin(), searched_ids.end(), i) != searched_ids.end()) {
+		for (int candidate_node_id = 0; candidate_node_id < frame.num_spheres; candidate_node_id++) {
+			if (std::find(curr.visited_nodes_frame.begin(), curr.visited_nodes_frame.end(), candidate_node_id) != curr.visited_nodes_frame.end()) {
 				//Already used this element
 				continue;
 			}
-			std::vector<float> temp_err;
 			bool exceeded_side_tolerance = false;
 			float error_new = 0.f;
-			float error_counter = 0.f;
-			int candidate_sphere_id = i;
-			for (int j = 0; j < searched_ids.size(); j++) {
-				int id1 = searched_ids.at(j);
-				int id2 = i;
-				float error_side = cv::abs(frame_map.at<float>(id1, id2) - tool.map.at<float>(j, num_searched));
+			int error_counter = 0;
+			int tool_node_id = 0;
+			for (int j = 0; j < curr.visited_nodes_frame.size(); j++) {
+				//Account for occluded nodes
+				while (std::find(curr.occluded_nodes_tool.begin(), curr.occluded_nodes_tool.end(), tool_node_id) != curr.occluded_nodes_tool.end()) {
+					tool_node_id++;
+				}
+				int id1 = curr.visited_nodes_frame.at(j);
+				int id2 = candidate_node_id;
+
+				//Swap if id1 is bigger than id2 (we only build a triangular distance matrix)
+				if (id1 > id2)
+				{
+					int temp = id1;
+					id1 = id2;
+					id2 = temp;
+				}
+				float error_side = cv::abs(frame_map.at<float>(id1, id2) - tool.map.at<float>(tool_node_id, curr.visited_nodes_frame.size()+curr.occluded_nodes_tool.size()));
 				if (error_side > m_fToleranceSide) {
 					exceeded_side_tolerance = true;
 					break;
 				}
 				error_new += error_side;
 				error_counter++;
-				temp_err.push_back(error_side);
+				tool_node_id++;
 			}
 			if (exceeded_side_tolerance)
+			{
+				if (curr.occluded_nodes_tool.size() < (max_occluded_spheres))
+				{
+					std::vector<int> occluded_nodes_new = std::vector<int>(curr.occluded_nodes_tool);
+					occluded_nodes_new.push_back(curr.visited_nodes_frame.size() + curr.occluded_nodes_tool.size());
+					search_list.push_back(search_entry{ curr.visited_nodes_frame, curr.combined_error, curr.num_sides, occluded_nodes_new});
+				}
 				continue;
-			std::vector<int> searched_ids_new = std::vector<int>(searched_ids);
-			searched_ids_new.push_back(i);
-			search_list.push_back(std::tuple<std::vector<int>, float, int>(searched_ids_new, error_searched + error_new, std::get<2>(curr) + error_counter));
+			}
+				
+			std::vector<int> searched_ids_new = std::vector<int>(curr.visited_nodes_frame);
+			searched_ids_new.push_back(candidate_node_id);
+			search_list.push_back(search_entry{ searched_ids_new, curr.combined_error + error_new, curr.num_sides + error_counter, curr.occluded_nodes_tool});
 		}
 	}
+	tool.tracking_finished = true;
+	return;
 }
 
 
 
-cv::Mat* IRToolTracker::UnionSegmentation(ToolResultContainer* raw_solutions, int num_tools, ProcessedAHATFrame frame) {
+void IRToolTracker::UnionSegmentation(ToolResultContainer* raw_solutions, int num_tools, ProcessedAHATFrame frame) {
 #if DEBUG_OUTPUT
 	OutputDebugString(L"UnionSegmentation\n");
 #endif
 	int* tool_solutions = new int[num_tools];
 	std::vector<ToolResult> unique_solutions;
-	cv::Mat* tool_transforms = new cv::Mat[num_tools];
-	for (int i = 0; i < num_tools; i++)
-	{
-		tool_transforms[i] = cv::Mat::zeros(cv::Size(8, 1), CV_32F);
-	}
 	for (int i = 0; i < num_tools; i++)
 	{
 		tool_solutions[i] = 0;
@@ -232,7 +330,12 @@ cv::Mat* IRToolTracker::UnionSegmentation(ToolResultContainer* raw_solutions, in
 		ToolResult current = unique_solutions.front();
 		int cur_toolid = current.tool_id;
 		unique_solutions.erase(unique_solutions.begin());
-		tool_transforms[cur_toolid] = MatchPointsKabsch(m_Tools[cur_toolid], frame, current.sphere_ids);
+		cv::Mat result = MatchPointsKabsch(m_Tools[cur_toolid], frame, current.sphere_ids, current.occluded_nodes);
+		if (result.at<float>(7, 0) == 1.f)
+		{
+			m_Tools.at(cur_toolid).cur_transform = result.clone();
+			m_Tools.at(cur_toolid).timestamp = frame.timestamp;
+		}
 
 		std::vector<ToolResult> remaining_unique_solutions;
 		for (ToolResult next_check : unique_solutions) {
@@ -269,21 +372,21 @@ cv::Mat* IRToolTracker::UnionSegmentation(ToolResultContainer* raw_solutions, in
 		unique_solutions = remaining_unique_solutions;
 	}
 	delete[] tool_solutions;
-	return tool_transforms;
+	return;
 }
 
-cv::Mat IRToolTracker::MatchPointsKabsch(IRToolDefinition tool, ProcessedAHATFrame frame, std::vector<int> sphere_ids) {
+cv::Mat IRToolTracker::MatchPointsKabsch(IRTrackedTool tool, ProcessedAHATFrame frame, std::vector<int> sphere_ids, std::vector<int> occluded_nodes) {
 #if DEBUG_OUTPUT
 	OutputDebugString(L"MatchPointsKabsch\n");
 #endif
-	int num_points = tool.num_spheres;
+	int num_points = tool.num_spheres-occluded_nodes.size();
 	cv::Mat p = cv::Mat(num_points, 3, CV_32F);
 	cv::Mat q = cv::Mat(num_points, 3, CV_32F);
 	cv::Vec3f p_center = cv::Vec3f(0.f);
 	cv::Vec3f q_center = cv::Vec3f(0.f);
 
 	auto it_spheres_xyz = frame.spheres_xyz_per_mm.find(tool.sphere_radius);
-	auto frame_spheres_xyz = it_spheres_xyz->second;
+	cv::Mat3f frame_spheres_xyz = it_spheres_xyz->second;
 
 	cv::Mat hololens_pose_mm = frame.hololens_pose.clone();
 
@@ -291,9 +394,14 @@ cv::Mat IRToolTracker::MatchPointsKabsch(IRToolDefinition tool, ProcessedAHATFra
 	hololens_pose_mm.at<float>(1, 3) = hololens_pose_mm.at<float>(1, 3) * 1000.f;
 	hololens_pose_mm.at<float>(2, 3) = hololens_pose_mm.at<float>(2, 3) * 1000.f;
 
-
+	int tool_node_id = 0;
 	for (int i = 0; i < num_points; i++) {
-		cv::Vec3f sphere = tool.spheres_xyz.at<cv::Vec3f>(i, 0);
+		while (std::find(occluded_nodes.begin(), occluded_nodes.end(), tool_node_id) != occluded_nodes.end()) {
+			tool_node_id++;
+		}
+		cv::Vec3f sphere = tool.spheres_xyz.at<cv::Vec3f>(tool_node_id, 0);
+		
+
 		p.at<float>(i, 0) = sphere[0];
 		p.at<float>(i, 1) = sphere[1];
 		p.at<float>(i, 2) = sphere[2];
@@ -316,13 +424,10 @@ cv::Mat IRToolTracker::MatchPointsKabsch(IRToolDefinition tool, ProcessedAHATFra
 		cv::Vec3f sphere_world = cv::Vec3f(sphere_world_mat.at<float>(0, 0), sphere_world_mat.at<float>(1, 0), sphere_world_mat.at<float>(2, 0));
 
 		//Filter the resulting world position
-#if DEBUG_NO_FILTER
-		if (false)
+#if !DEBUG_NO_FILTER && !DISABLE_KALMAN
+		sphere_world = tool.sphere_kalman_filters.at(tool_node_id).FilterData(sphere_world);
 #endif
-		sphere_world = tool.sphere_kalman_filters.at(i).FilterData(sphere_world);
-
-
-
+		tool_node_id++;
 
 
 		q.at<float>(i, 0) = sphere_world[0];
@@ -331,6 +436,7 @@ cv::Mat IRToolTracker::MatchPointsKabsch(IRToolDefinition tool, ProcessedAHATFra
 		q_center[0] += sphere_world[0];
 		q_center[1] += sphere_world[1];
 		q_center[2] += sphere_world[2];
+
 	}
 
 	p_center /= num_points;
@@ -406,10 +512,21 @@ cv::Mat IRToolTracker::MatchPointsKabsch(IRToolDefinition tool, ProcessedAHATFra
 	quat[1] *= (quat[1] * (transform_matrix.at<float>(0, 2) - transform_matrix.at<float>(2, 0))) >= 0.f ? 1.f : -1.f;
 	quat[2] *= (quat[2] * (transform_matrix.at<float>(1, 0) - transform_matrix.at<float>(0, 1))) >= 0.f ? 1.f : -1.f;
 
-#if DEBUG_NO_FILTER
-	if (false)
+	DirectX::XMVECTOR rotation{ quat[0], quat[1], quat[2], quat[3] };
+
+#if !DISABLE_LOWPASS && !DEBUG_NO_FILTER
+	{
+		
+		DirectX::XMVECTOR rotation_old{ tool.cur_transform.at<float>(3, 0), tool.cur_transform.at<float>(4, 0), tool.cur_transform.at<float>(5, 0), tool.cur_transform.at<float>(6, 0) };
+		rotation = DirectX::XMQuaternionSlerp(rotation_old, rotation, tool.lowpass_factor_rotation);
+		
+		cv::Vec3f position_old{ tool.cur_transform.at<float>(0, 0) ,tool.cur_transform.at<float>(1, 0) ,tool.cur_transform.at<float>(2, 0) };
+		position = tool.lowpass_factor_position*position+(1-tool.lowpass_factor_position)*position_old;
+
+	}
 #endif
-		position = tool.kalman_filter_position.FilterData(position);
+
+		
 
 	cv::Mat position_rotation = cv::Mat::zeros(8, 1, CV_32F);
 	//Position in xyz
@@ -417,10 +534,10 @@ cv::Mat IRToolTracker::MatchPointsKabsch(IRToolDefinition tool, ProcessedAHATFra
 	position_rotation.at<float>(1, 0) = position[1];
 	position_rotation.at<float>(2, 0) = position[2];
 	//Quaternion
-	position_rotation.at<float>(3, 0) = quat[0];
-	position_rotation.at<float>(4, 0) = quat[1];
-	position_rotation.at<float>(5, 0) = quat[2];
-	position_rotation.at<float>(6, 0) = quat[3];
+	position_rotation.at<float>(3, 0) = rotation.vector4_f32[0];
+	position_rotation.at<float>(4, 0) = rotation.vector4_f32[1];
+	position_rotation.at<float>(5, 0) = rotation.vector4_f32[2];
+	position_rotation.at<float>(6, 0) = rotation.vector4_f32[3];
 	//Last float is used to determine visibility of the tool
 	position_rotation.at<float>(7, 0) = 1.f;
 
@@ -448,7 +565,7 @@ void IRToolTracker::ConstructMap(cv::Mat3f spheres_xyz, int num_spheres, cv::Mat
 	OutputDebugString(L"ConstructMap\n");
 #endif
 	for (int i = 0; i < num_spheres; i++) {
-		for (int j = 0; j < num_spheres; j++) {
+		for (int j = i; j < num_spheres; j++) {
 			float distance = cv::norm(spheres_xyz.at<cv::Vec3f>(i, 0) - spheres_xyz.at<cv::Vec3f>(j, 0));
 			map.at<float>(i, j) = distance;
 			if (i == j)
@@ -474,11 +591,40 @@ void IRToolTracker::ConstructMap(cv::Mat3f spheres_xyz, int num_spheres, cv::Mat
 	}
 }
 
-void IRToolTracker::AddFrame(void* pAbImage, void* pDepth, UINT32 depthWidth, UINT32 depthHeight, cv::Mat _pose, long long _timestamp) {
+void IRToolTracker::AddEnvFrame(void* pLFImage, void* pRFImage, size_t LFOutBufferCount, INT64 tsLF, INT64 tsRF, float* pLFExtr, float* pRFExtr)
+{
+	m_MutexCurEnvFrame.lock();
+
+	while (m_CurEnvFrameBuffer.size() >= m_iCurEnvFrameBufferMaxSize) {
+		delete m_CurEnvFrameBuffer.back();
+		m_CurEnvFrameBuffer.pop_back();
+	}
+
+	EnvFrame* newFrame = new EnvFrame{new UINT8[LFOutBufferCount], new UINT8[LFOutBufferCount], new float[12], new float[12], tsLF, tsRF};
+	memcpy(newFrame->pLFImage, pLFImage, LFOutBufferCount * sizeof(UINT8));
+	memcpy(newFrame->pRFImage, pRFImage, LFOutBufferCount * sizeof(UINT8));
+	memcpy(newFrame->pLFExtr, pLFExtr, 12 * sizeof(float));
+	memcpy(newFrame->pRFExtr, pRFExtr, 12 * sizeof(float));
+	m_CurEnvFrameBuffer.insert(m_CurEnvFrameBuffer.begin(), newFrame);
+
+#if DEBUG_OUTPUT
+	std::string my_str = "Add Env Frame: \nTS Left = ";
+	my_str += (std::to_string(m_curEnvFrame->tsLF) + "; TS Right = " + std::to_string(m_curEnvFrame->tsRF) + "; Difference = " + std::to_string(m_curEnvFrame->tsLF-m_curEnvFrame->tsRF) + ";\n");
+	std::wstring stemp = std::wstring(my_str.begin(), my_str.end());
+	LPCWSTR my2 = stemp.c_str();
+	OutputDebugString(my2);
+#endif 
+
+	m_MutexCurEnvFrame.unlock();
+
+	
+}
+
+void IRToolTracker::AddFrame(void* pAbImage, void* pDepth, UINT32 depthWidth, UINT32 depthHeight, cv::Mat _pose, INT64 _timestamp) {
 
 #if DEBUG_OUTPUT
 	OutputDebugString(L"Add Frame\n");
-#endif
+#endif 
 	cv::Mat cvAbImage_origin(512, 512, CV_16UC1, (void*)pAbImage);
 	cv::Mat cvAbImage = cvAbImage_origin.clone();
 
@@ -492,7 +638,18 @@ void IRToolTracker::AddFrame(void* pAbImage, void* pDepth, UINT32 depthWidth, UI
 	m_CurrentFrame = new AHATFrame { _timestamp, _pose, cvAbImage,  new UINT16[depthWidth * depthHeight], depthWidth, depthHeight };
 	memcpy(m_CurrentFrame->pDepth, pDepth, depthWidth * depthHeight * sizeof(UINT16));
 
+
+#if DEBUG_OUTPUT
+	std::string my_str = "Add Frame: \nTS = ";
+	my_str += (std::to_string(_timestamp) + ";\n");
+	std::wstring stemp = std::wstring(my_str.begin(), my_str.end());
+	LPCWSTR my2 = stemp.c_str();
+	OutputDebugString(my2);
+#endif 
+
 	m_MutexCurFrame.unlock();
+
+	
 	
 
 }
@@ -503,15 +660,15 @@ bool IRToolTracker::ProcessFrame(AHATFrame* rawFrame, ProcessedAHATFrame &result
 #endif
 
 
-	ushort lowerLimit = 256 * 1.5;
-	ushort upperLimit = 256 * 20;
+	ushort lowerLimit = 256 * 5;
+	ushort upperLimit = lowerLimit + 1;// 256 * 20;
 	int minSize = 10, maxSize = 180;
 	cv::Mat labels, stats, centroids;
 	std::vector<float> irToolCenters;
 	
 	rawFrame->cvAbImage.forEach<ushort>(
 		[&](ushort& ir, const int* position) -> void {
-			ir = (std::clamp(ir, lowerLimit, upperLimit) - lowerLimit) * (256 * 256 / upperLimit) / (upperLimit - lowerLimit);
+			ir = (std::clamp(ir, lowerLimit, upperLimit) - lowerLimit) / (upperLimit - lowerLimit)*255;
 		}
 	);
 	
@@ -529,55 +686,13 @@ bool IRToolTracker::ProcessFrame(AHATFrame* rawFrame, ProcessedAHATFrame &result
 			double _v = centroids.at<double>(i, 1);
 			float uv[2] = { _u + 0.5, _v + 0.5 };
 			float xy[2] = { 0, 0 };
-#if DEBUG_OUTPUT
-			{
-				auto finish_detail = std::chrono::high_resolution_clock::now();
-				std::string my_str = "U: ";
-				my_str += (std::to_string(uv[0]) + " V: " + std::to_string(uv[1]) + " X: " + std::to_string(xy[0]) + " Y: " + std::to_string(xy[1]) + "\n");
-				std::wstring stemp = std::wstring(my_str.begin(), my_str.end());
-				LPCWSTR my2 = stemp.c_str();
-				OutputDebugString(my2);
-			}
-#endif
+
+			float depth = (static_cast<float>(rawFrame->pDepth[rawFrame->depthWidth * (UINT16)_v + (UINT16)_u]));
+
 			m_pResearchMode->DepthMapImagePointToCameraUnitPlane(uv, xy);
-#if DEBUG_OUTPUT
-			{
-				auto finish_detail = std::chrono::high_resolution_clock::now();
-				std::string my_str = "U: ";
-				my_str += (std::to_string(uv[0]) + " V: " + std::to_string(uv[1]) + " X: " + std::to_string(xy[0]) + " Y: " + std::to_string(xy[1]) + "\n");
-				std::wstring stemp = std::wstring(my_str.begin(), my_str.end());
-				LPCWSTR my2 = stemp.c_str();
-				OutputDebugString(my2);
-			}
-#endif
-			//UINT16 depth = pDepth[resolution.Width * (UINT16)(_v + 0.5) + (UINT16)(_u + 0.5)];
-
-			//UINT16 depth = MIN(MIN(MIN(pDepth[resolution.Width * (UINT16)_v + (UINT16)_u],
-			//    pDepth[resolution.Width * (UINT16)_v + (UINT16)_u + 1]),
-			//    pDepth[resolution.Width * ((UINT16)_v + 1) + (UINT16)_u]),
-			//    pDepth[resolution.Width * ((UINT16)_v + 1) + (UINT16)_u + 1]);
-
-			float depth = (static_cast<float>(rawFrame->pDepth[rawFrame->depthWidth * (UINT16)_v + (UINT16)_u] +
-				rawFrame->pDepth[rawFrame->depthWidth * (UINT16)_v + (UINT16)_u + 1] +
-				rawFrame->pDepth[rawFrame->depthWidth * ((UINT16)_v + 1) + (UINT16)_u] +
-				rawFrame->pDepth[rawFrame->depthWidth * ((UINT16)_v + 1) + (UINT16)_u + 1])) / 4.f;
-
-
-
-
 			irToolCenters.push_back(xy[0]);
 			irToolCenters.push_back(xy[1]);
 			irToolCenters.push_back(depth);
-#if DEBUG_OUTPUT
-			{
-				auto finish_detail = std::chrono::high_resolution_clock::now();
-				std::string my_str = "X: ";
-				my_str += (std::to_string(xy[0]) + " Y: " + std::to_string(xy[1]) + " Z: " + std::to_string(depth) + "\n");
-				std::wstring stemp = std::wstring(my_str.begin(), my_str.end());
-				LPCWSTR my2 = stemp.c_str();
-				OutputDebugString(my2);
-			}
-#endif
 		}
 	}
 
@@ -602,12 +717,11 @@ bool IRToolTracker::ProcessFrame(AHATFrame* rawFrame, ProcessedAHATFrame &result
 	}
 
 	//Create 3d coordinates for every possible sphere size
-
 	std::map<float, std::vector<Side>> ordered_sides_per_mm;
 	std::map<float, cv::Mat> map_per_mm;
 	std::map<float, cv::Mat3f> spheres_xyz_per_mm;
 
-	for (IRToolDefinition tool : m_Tools)
+	for (IRTrackedTool tool : m_Tools)
 	{
 		float cur_radius = tool.sphere_radius;
 		if (!(spheres_xyz_per_mm.find(cur_radius) == spheres_xyz_per_mm.end())) {
@@ -622,8 +736,8 @@ bool IRToolTracker::ProcessFrame(AHATFrame* rawFrame, ProcessedAHATFrame &result
 		spheres_xyz.forEach(
 			[&](cv::Vec3f& xyz, const int* position) -> void {
 				xyz[2] = xyz[2] + cur_radius;
-		cv::Vec3f temp_vec(xyz[0], xyz[1], 1);
-		xyz = cv::Vec3f((temp_vec / cv::norm(temp_vec)) * xyz[2]);
+				cv::Vec3f temp_vec(xyz[0], xyz[1], 1);
+				xyz = cv::Vec3f((temp_vec / cv::norm(temp_vec)) * xyz[2]);
 			}
 		);
 
@@ -636,15 +750,6 @@ bool IRToolTracker::ProcessFrame(AHATFrame* rawFrame, ProcessedAHATFrame &result
 		ordered_sides_per_mm.insert({ cur_radius, ordered_sides });
 		map_per_mm.insert({ cur_radius, map });
 		spheres_xyz_per_mm.insert({ cur_radius, spheres_xyz });
-
-#if DEBUG_OUTPUT
-		std::string my_str = "Sphere Positions " + std::to_string(cur_radius) + " mm:\n";
-		my_str << spheres_xyz;
-		std::wstring stemp = std::wstring(my_str.begin(), my_str.end());
-		LPCWSTR my2 = stemp.c_str();
-		OutputDebugString(my2);
-		OutputDebugString(L"\n");
-#endif
 
 	}
 
@@ -663,10 +768,9 @@ bool IRToolTracker::ProcessFrame(AHATFrame* rawFrame, ProcessedAHATFrame &result
 	delete rawFrame;
 
 	return true;
-
 }
 
-bool IRToolTracker::AddTool(cv::Mat3f spheres, float sphere_radius, std::string identifier)
+bool IRToolTracker::AddTool(cv::Mat3f spheres, float sphere_radius, std::string identifier, uint min_visible_spheres, float lowpass_rotation, float lowpass_position)
 {
 #if DEBUG_OUTPUT
 	OutputDebugString(L"AddTool\n");
@@ -680,13 +784,16 @@ bool IRToolTracker::AddTool(cv::Mat3f spheres, float sphere_radius, std::string 
 		restartTracking = true;
 		StopTracking();
 	}
-	IRToolDefinition tool{};
+
+	//Create the tool
+	IRTrackedTool tool{};
 	tool.identifier = identifier;
 	tool.num_spheres = spheres.size().height;
 	tool.spheres_xyz = spheres;
 	tool.sphere_radius = sphere_radius;
-
-	m_ToolIndexMapping.insert({ identifier, m_Tools.size() });
+	tool.min_visible_spheres = std::max((uint)3, std::min(min_visible_spheres, tool.num_spheres));
+	tool.lowpass_factor_position = lowpass_position;
+	tool.lowpass_factor_rotation = lowpass_rotation;
 
 	//Construct map
 	cv::Mat map(cv::Size(tool.num_spheres, tool.num_spheres), CV_32F);
@@ -698,6 +805,8 @@ bool IRToolTracker::AddTool(cv::Mat3f spheres, float sphere_radius, std::string 
 	for (int i = 0; i < tool.num_spheres; i++) {
 		tool.sphere_kalman_filters.push_back(IRToolKalmanFilter());
 	}
+	//Add to map so we can find the tool with name
+	m_ToolIndexMapping.insert({ identifier, m_Tools.size() });
 	m_Tools.push_back(tool);
 	OutputDebugString(L"On Device Tracking Added Tool\n");
 
@@ -745,7 +854,7 @@ bool IRToolTracker::RemoveTool(std::string identifier)
 	}
 
 	m_ToolIndexMapping.erase(identifier);
-	std::vector<IRToolDefinition> oldTools(m_Tools);
+	std::vector<IRTrackedTool> oldTools(m_Tools);
 	std::map<std::string, int> oldMapping(m_ToolIndexMapping);
 	m_Tools.clear();
 	m_ToolIndexMapping.clear();
@@ -763,7 +872,7 @@ bool IRToolTracker::RemoveTool(std::string identifier)
 	return true;
 }
 
-bool IRToolTracker::RemoveAllToolDefinitions()
+bool IRToolTracker::RemoveAllTools()
 {
 #if DEBUG_OUTPUT
 	OutputDebugString(L"RemoveAllTools\n");
@@ -782,4 +891,14 @@ bool IRToolTracker::StartTracking() {
 	m_bShouldStop = false;
 	m_TrackingThread = std::thread(&IRToolTracker::TrackTools, this);
 	return true;
+}
+
+void IRToolTracker::StopTracking()
+{
+#if DEBUG_OUTPUT
+	OutputDebugString(L"StopTracking\n");
+#endif
+	m_bShouldStop = true;
+	//Wait until thread shuts down
+	m_TrackingThread.join();
 }

@@ -9,150 +9,15 @@
 #include <opencv2/core.hpp>
 #include <opencv2/video/tracking.hpp>
 
+#include <DirectXMath.h>
+
+#include "IRStructs.h"
 
 //Forward Decl
 namespace winrt::HL2IRToolTracking::implementation
 {
 	struct HL2IRTracking;
 }
-
-struct Side
-{
-	int id_from{ 0 };
-	int id_to{ 0 };
-	float distance{ 0 };
-
-	static bool compare(Side a, Side b) {
-		if (a.distance < b.distance) {
-			return true;
-		}
-		return false;
-	}
-
-};
-
-struct AHATFrame {
-	long long timestamp;
-	cv::Mat hololens_pose;
-	cv::Mat cvAbImage;
-	UINT16* pDepth;
-	UINT32 depthWidth;
-	UINT32 depthHeight;
-};
-
-struct ProcessedAHATFrame
-{
-	long long timestamp;
-	cv::Mat hololens_pose;
-	uint num_spheres;
-	cv::Mat3f spheres_xyd;
-	std::map<float, cv::Mat3f> spheres_xyz_per_mm;
-	std::map<float, std::vector<Side>> ordered_sides_per_mm;
-	std::map<float, cv::Mat> map_per_mm;
-};
-
-struct ToolResult
-{
-	int tool_id{ -1 };
-	std::vector<int> sphere_ids;
-	float error{ 0 };
-	static bool compare(ToolResult a, ToolResult b)
-	{
-		if (a.error < b.error) {
-			return true;
-		}
-		return false;
-	}
-};
-
-struct ToolResultContainer
-{
-	int tool_id{ -1 };
-	std::vector<ToolResult> candidates;
-};
-
-
-class IRToolKalmanFilter
-{
-public:
-	IRToolKalmanFilter() {
-		m_filter = cv::KalmanFilter(6, 3, 0, CV_32F);
-
-	}
-	IRToolKalmanFilter(float measurementNoise, float positionNoise, float velocityNoise) {
-		m_filter = cv::KalmanFilter(6, 3, 0, CV_32F);
-		m_fPositionNoise = positionNoise;
-		m_fVelocityNoise = velocityNoise;
-		m_fMeasurementNoise = measurementNoise;
-	}
-	cv::Vec3f FilterData(cv::Vec3f value) {
-		if (!m_bInitialized) {
-			InitializeFilter(value);
-		}
-		auto prediction = m_filter.predict();
-		measurement = cv::Mat(value).reshape(1, 3);
-		cv::Mat correction = m_filter.correct(measurement);
-
-		return cv::Vec3f(correction.at<float>(0, 0), correction.at<float>(1, 0), correction.at<float>(2, 0));
-	}
-private:
-	void InitializeFilter(cv::Vec3f value) {
-		// Initialize the state transition matrix (A)
-		cv::Mat A = cv::Mat::eye(6, 6, CV_32F);
-		A.at<float>(0, 3) = 1.f; // x += vx*dt
-		A.at<float>(1, 4) = 1.f; // y += vy*dt
-		A.at<float>(2, 5) = 1.f; // z += vz*dt
-		m_filter.transitionMatrix = A;
-
-		// Initialize the measurement matrix (H)
-		cv::Mat H = cv::Mat::zeros(3, 6, CV_32F);
-		H.at<float>(0, 0) = 1.f;// x
-		H.at<float>(1, 1) = 1.f;// y
-		H.at<float>(2, 2) = 1.f;// z
-		m_filter.measurementMatrix = H;
-
-		// Initialize the process noise covariance matrix (Q)
-		cv::Mat Q = cv::Mat::zeros(6, 6, CV_32F);
-		Q.at<float>(0, 0) = Q.at<float>(1, 1) = Q.at<float>(2, 2) = m_fPositionNoise; // position noise
-		Q.at<float>(3, 3) = Q.at<float>(4, 4) = Q.at<float>(5, 5) = m_fVelocityNoise; // velocity noise
-		m_filter.processNoiseCov = Q;
-
-		// Initialize the measurement noise covariance matrix (R)
-		cv::Mat R = cv::Mat::eye(3, 3, CV_32F) * m_fMeasurementNoise; // measurement noise
-		m_filter.measurementNoiseCov = R;
-
-		// Initialize the state estimate (x) and the error covariance matrix (P)
-		cv::Mat x = cv::Mat::zeros(6, 1, CV_32F); // initial state is all zeros
-		cv::Mat P = cv::Mat::eye(6, 6, CV_32F); // initial error covariance is identity matrix
-		m_filter.statePre = x;
-		m_filter.errorCovPost = P;
-
-		m_bInitialized = true;
-		return;
-	}
-
-	cv::Mat measurement = cv::Mat(1, 3, CV_32F);
-	//cv::Mat_<float> measurement(3, 1);
-	bool m_bInitialized = false;
-	cv::KalmanFilter m_filter;
-	float m_fMeasurementNoise = 1;// 1e-1; - measurements are usually within 3mm of position (3^2=9)
-	float m_fPositionNoise = 1e-4;//1e-4; - prediction is usually within .1mm of position (.1^2 = 1e-2)
-	float m_fVelocityNoise = 1e-2;// 1e-2; - velocity is probably similar
-
-};
-
-struct IRToolDefinition
-{
-	std::string identifier;
-	uint num_spheres;
-	cv::Mat3f spheres_xyz;
-	std::vector<IRToolKalmanFilter> sphere_kalman_filters;
-	IRToolKalmanFilter kalman_filter_position{ 1e-3, 1e-7, 1e-5 };
-	std::vector<Side> ordered_sides;
-
-	cv::Mat map;
-	float sphere_radius;
-};
 
 
 class IRToolTracker
@@ -163,10 +28,11 @@ public:
 	}
 
 
-	void AddFrame(void* pAbImage, void* pDepth, UINT32 depthWidth, UINT32 depthHeight, cv::Mat _pose, long long _timestamp);
-	bool AddTool(cv::Mat3f spheres, float sphere_radius, std::string identifier);
+	void AddFrame(void* pAbImage, void* pDepth, UINT32 depthWidth, UINT32 depthHeight, cv::Mat _pose, INT64 _timestamp);
+	void AddEnvFrame(void* pLFImage, void* pRFImage, size_t LFOutBufferCount, INT64 tsLF, INT64 tsRF, float* pLFExtr, float* pRFExtr);
+	bool AddTool(cv::Mat3f spheres, float sphere_radius, std::string identifier, uint min_visible_spheres, float lowpass_rotation, float lowpass_position);
 	bool RemoveTool(std::string identifier);
-	bool RemoveAllToolDefinitions();
+	bool RemoveAllTools();
 	bool StartTracking();
 
 
@@ -180,12 +46,14 @@ public:
 private:
 
 	bool ProcessFrame(AHATFrame* rawFrame, ProcessedAHATFrame& result);
+	
+	bool ProcessEnvFrame(ProcessedAHATFrame& ahat_frame, ToolResult& best_candidate);
 
-	void TrackTool(IRToolDefinition tool, ProcessedAHATFrame frame, ToolResultContainer& result);
+	void TrackTool(IRTrackedTool &tool, ProcessedAHATFrame &frame, ToolResultContainer &result);
 
-	cv::Mat* UnionSegmentation(ToolResultContainer* raw_solutions, int num_tools, ProcessedAHATFrame frame);
+	void UnionSegmentation(ToolResultContainer* raw_solutions, int num_tools, ProcessedAHATFrame frame);
 
-	cv::Mat MatchPointsKabsch(IRToolDefinition tool, ProcessedAHATFrame frame, std::vector<int> sphere_ids);
+	cv::Mat MatchPointsKabsch(IRTrackedTool tool, ProcessedAHATFrame frame, std::vector<int> sphere_ids, std::vector<int> occluded_nodes);
 
 	cv::Mat FlipTransformRightLeft(cv::Mat hololens_transform);
 
@@ -194,21 +62,16 @@ private:
 
 	bool m_bShouldStop = false;
 
-	std::vector<IRToolDefinition> m_Tools;
-	std::vector<ProcessedAHATFrame> m_FrameQueue;
+	std::vector<IRTrackedTool> m_Tools;
 
 	AHATFrame* m_CurrentFrame = nullptr;
+	std::vector<EnvFrame*> m_CurEnvFrameBuffer;
+	int m_iCurEnvFrameBufferMaxSize = 3;
 
 	std::mutex m_MutexCurFrame;
+	std::mutex m_MutexCurEnvFrame;
 
 	std::map<std::string, int> m_ToolIndexMapping;
-	std::atomic<cv::Mat*> m_CurToolTransforms = nullptr;
-
-
-
-	int m_nDownLimitAb = 128;
-	int m_nUpLimitAb = 512;
-	int m_nQueueSize = 5;
 
 	float m_fToleranceSide = 4.0f;
 	float m_fToleranceAvg = 4.0f;
@@ -219,8 +82,10 @@ private:
 
 	winrt::HL2IRToolTracking::implementation::HL2IRTracking* m_pResearchMode;
 
+	
+
 	//Crude way of doing uniqueness checks, I dont like it but oh well
-	int m_prime_numbers[500] = { 2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37,
+	const int m_prime_numbers[500] = { 2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37,
 		41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107,
 		109, 113, 127, 131, 137, 139, 149, 151, 157, 163, 167, 173, 179,
 		181, 191, 193, 197, 199, 211, 223, 227, 229, 233, 239, 241, 251,

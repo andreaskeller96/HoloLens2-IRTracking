@@ -9,6 +9,8 @@ namespace HL2IRToolTracking
         Boolean IsTrackingTools();
 
         Boolean AddToolDefinition(Int32 sphere_count, Single[] sphere_positions, Single sphere_radius, String identifier);
+        Boolean AddToolDefinition(Int32 sphere_count, Single[] sphere_positions, Single sphere_radius, String identifier, Int32 min_visible_spheres);
+        Boolean AddToolDefinition(Int32 sphere_count, Single[] sphere_positions, Single sphere_radius, String identifier, Int32 min_visible_spheres, Single lowpass_rotation, Single lowpass_position);
         Boolean RemoveToolDefinition(String identifier);
         Boolean RemoveAllToolDefinitions();
 
