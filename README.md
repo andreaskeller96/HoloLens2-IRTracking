@@ -26,7 +26,8 @@ Check out the Unity Sample application provided here: https://github.com/andreas
 
 
 ## Thanks
-This project makes use of a number of awesome open source libraries, including:
+Special thanks to Wenhao Gu for his hololens plugin project that this dll is based on: https://github.com/petergu684/HoloLens2-ResearchMode-Unity
+This project also makes use of a number of awesome open source libraries, including:
 * [opencv](https://github.com/opencv/opencv)
 * [libtiff](https://gitlab.com/libtiff/libtiff)
 * [zlib](https://github.com/madler/zlib)
