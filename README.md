@@ -1,10 +1,29 @@
 # On-Device HoloLens 2 IR Tracking
 
-This project contains the source code for tracking passive IR sphere markers using only the HoloLens 2 sensors.
+This project contains the source code for tracking passive IR sphere markers using only the HoloLens 2 AHAT Sensor.
 
 
-## How to use
-TODO
+## Features
+* Easy-to-use tracking of retro-reflective marker arrays using the HoloLens 2 research mode
+* Simultaneous tracking of multiple markers (tested with up to 5, can theoretically support a lot more)
+* Support for partial marker occlusion - define marker arrays with 4 or more spheres, keep tracking even when some are occluded (min. 3 visible at all times)
+* Support for spherical markers and flat marker stickers
+* Support for different marker times tracked simultaneously
+* Filter 3D sphere world positions using Kalman Filters
+* Filter marker array world position and rotation using low-pass filtering
+
+
+## How to use precompiled library
+Check out the Unity Sample application provided here: https://github.com/andreaskeller96/HoloLens2-IRTracking-Sample/
+
+
+## How to build from source
+1. Add zlib, libtiff, opencv412d to the project before compilation
+2. Compile for ARM64 in release mode
+3. Copy the resulting HL2IRToolTracking.winmd and HL2IRToolTracking.dll to your Unity Project's Assets/.../Plugins/WSA/ARM64/ folder
+4. Copy the contents of the UnityBindings folder to your Unity Project's Assets/.../Scripts folder
+5. Setup scene as in the sample here: https://github.com/andreaskeller96/HoloLens2-IRTracking-Sample/
+
 
 ## Thanks
 This project makes use of a number of awesome open source libraries, including:
