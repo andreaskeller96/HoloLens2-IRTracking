@@ -76,11 +76,16 @@ public class IRToolTracking : MonoBehaviour
     {
         if (!startToolTracking)
         {
+            Debug.Log("Tracking was not started, so cannot stop it");
             return;
         }
 
 #if ENABLE_WINMD_SUPPORT
-        toolTracking.StopToolTracking();
+        var success = toolTracking.StopToolTracking();
+        if (!success)
+        {
+            Debug.Log("Could not stop tracking");
+        }
         startToolTracking = false;
         foreach (IRToolController tool in tools)
         {

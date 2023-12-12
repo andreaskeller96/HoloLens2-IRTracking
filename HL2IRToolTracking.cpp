@@ -348,6 +348,7 @@ namespace winrt::HL2IRToolTracking::implementation
         pHL2IRTracking->m_depthSensor->CloseStream();
         pHL2IRTracking->m_depthSensor->Release();
         pHL2IRTracking->m_depthSensor = nullptr;
+        pHL2IRTracking->m_pDepthCameraSensor = nullptr;
 
     }
 
@@ -496,16 +497,20 @@ namespace winrt::HL2IRToolTracking::implementation
         return m_IRToolTracker->StartTracking();;
     }
 
-    void HL2IRTracking::StopToolTracking()
+    bool HL2IRTracking::StopToolTracking()
     {
         if (m_IRToolTracker == nullptr)
-            return;
+            return false;
+        OutputDebugString(L"On Device Tracking Stopping.\n");
         //Stop Tracking thread
         m_IRToolTracker->StopTracking();
 
         //Stop depth sensor thread
         m_depthSensorLoopStarted = false;
         m_pDepthUpdateThread->join();
+        OutputDebugString(L"On Device Tracking Stopped.\n");
+        return true;
+
     }
 
     com_array<float> HL2IRTracking::GetToolTransform(hstring identifier)

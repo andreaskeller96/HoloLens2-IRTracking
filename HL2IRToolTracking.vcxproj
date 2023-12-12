@@ -83,8 +83,8 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
     <OutDir>.\Out\</OutDir>
-    <IncludePath>$(SolutionDir)\Eigen;$(SolutionDir)\OpenCvInstallArm64-412d\include;$(IncludePath)</IncludePath>
-    <LibraryPath>$(SolutionDir)\OpenCvInstallArm64-412d\x64\vc15\staticlib;$(SolutionDir)\OpenCvInstallArm64-412d\x64\vc15\lib;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(SolutionDir)\Eigen;$(SolutionDir)\OpenCV\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(SolutionDir)\OpenCV\lib\ARM64\Release\;$(SolutionDir)\OpenCV\3rdparty\lib\ARM64\Release\;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
@@ -120,7 +120,7 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <AdditionalLibraryDirectories Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">opencv_world412.lib;zlib.lib;zlibd.lib;quirc.lib;quircd.lib;libtiff.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">opencv_world480.lib;ade.lib;IlmImf.lib;ittnotify.lib;libjpeg-turbo.lib;libopenjp2.lib;libpng.lib;libprotobuf.lib;libtiff.lib;libwebp.lib;tegra_hal.lib;zlib.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>

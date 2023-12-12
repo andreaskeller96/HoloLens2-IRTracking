@@ -16,7 +16,7 @@ namespace HL2IRToolTracking
 
 
         Boolean StartToolTracking();
-        void StopToolTracking();
+        Boolean StopToolTracking();
 
 
         Single[] GetToolTransform(String identifier);

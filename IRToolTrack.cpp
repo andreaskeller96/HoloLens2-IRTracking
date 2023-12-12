@@ -25,6 +25,10 @@ cv::Mat IRToolTracker::GetToolTransform(std::string identifier)
 	int index = it->second;
 
 	cv::Mat transform = m_Tools.at(index).cur_transform;
+	if (m_lTrackedTimestamp != m_Tools.at(index).timestamp)
+	{
+		transform.at<float>(7, 0) = 0.f;
+	}
 	return transform;
 }
 
@@ -304,21 +308,11 @@ void IRToolTracker::UnionSegmentation(ToolResultContainer* raw_solutions, int nu
 
 		std::vector<ToolResult> ordered_candidates = tool_results.candidates;
 		std::sort(ordered_candidates.begin(), ordered_candidates.end(), &ToolResult::compare);
-		std::vector<int> unique_primes;
 
 		for (ToolResult candidate : ordered_candidates)
 		{
-			int prime = 1;
-			for (int index : candidate.sphere_ids)
-			{
-				prime *= m_prime_numbers[index];
-			}
-			if (std::find(unique_primes.begin(), unique_primes.end(), prime) != unique_primes.end()) {
-				continue;
-			}
 			candidate.tool_id = i;
 			unique_solutions.push_back(candidate);
-			unique_primes.push_back(prime);
 			tool_solutions[i]++;
 		}
 	}
@@ -372,6 +366,7 @@ void IRToolTracker::UnionSegmentation(ToolResultContainer* raw_solutions, int nu
 		unique_solutions = remaining_unique_solutions;
 	}
 	delete[] tool_solutions;
+	m_lTrackedTimestamp = frame.timestamp;
 	return;
 }
 

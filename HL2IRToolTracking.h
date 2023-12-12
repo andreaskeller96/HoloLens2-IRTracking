@@ -40,37 +40,17 @@ namespace winrt::HL2IRToolTracking::implementation
         static HRESULT CheckCamConsent();
         static HRESULT CheckImuConsent();
 
-        UINT16 GetCenterDepth();
         int GetDepthBufferSize();
-        int GetLongDepthBufferSize();
         hstring PrintDepthResolution();
         hstring PrintDepthExtrinsics();
 
         void InitializeDepthSensor();
 
 
-        bool DepthMapUpdated();
-        bool DepthMapTextureUpdated();
-        bool PointCloudUpdated();
-        bool LongDepthMapTextureUpdated();
-        bool LongDepthMapUpdated();
-        bool LFImageUpdated();
-        bool RFImageUpdated();
-        bool LLImageUpdated();
-        bool RRImageUpdated();
-        bool PVImageUpdated();
-        bool LongThrowLUTUpdated();
         bool ShortThrowLUTUpdated();
-        bool PVInterrupted();
 
         void SetReferenceCoordinateSystem(Windows::Perception::Spatial::SpatialCoordinateSystem refCoord);
-
-        INT64 GetPVTimestamp();
-        INT64 GetLongDepthTimestamp();
         INT64 GetShortDepthTimestamp();
-        INT64 GetIMUTimestamp();
-        float GetSpatialLfFps();
-        float GetSpatialRfFps();
 
 
         
@@ -84,7 +64,7 @@ namespace winrt::HL2IRToolTracking::implementation
         bool RemoveToolDefinition(hstring identifier);
         bool RemoveAllToolDefinitions();
         bool StartToolTracking();
-        void StopToolTracking();
+        bool StopToolTracking();
         com_array<float> GetToolTransform(hstring identifier);
         INT64 GetTrackingTimestamp();
 

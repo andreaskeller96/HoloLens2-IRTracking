@@ -14,9 +14,6 @@
     <Filter Include="IRTrack">
       <UniqueIdentifier>{9b4c3a3d-fae0-439e-8b2d-034e1eaa9e23}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ML">
-      <UniqueIdentifier>{4b7cdf34-97c9-45ee-bc17-389f23d5e0c9}</UniqueIdentifier>
-    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="pch.cpp" />
@@ -47,8 +44,6 @@
   <ItemGroup>
     <None Include="HL2IRToolTracking.def" />
     <None Include="packages.config" />
-    <None Include="$(MSBuildThisFileDirectory)..\..\runtimes\win-arm64\native\onnxruntime.dll" />
-    <None Include="$(MSBuildThisFileDirectory)..\..\runtimes\win-arm64\native\onnxruntime_providers_shared.dll" />
   </ItemGroup>
   <ItemGroup>
     <None Include="PropertySheet.props" />
