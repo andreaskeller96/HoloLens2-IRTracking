@@ -19,20 +19,29 @@ Check out the Unity Sample application provided here: https://github.com/andreas
 
 ## How to build from source
 1. Follow steps described in OpenCV/README.md to compile OpenCV 4.8.0 from source
-2. Compile for ARM64 in release mode
-3. Copy ```Out/HL2IRToolTracking.winmd``` and ```HL2IRToolTracking.dll``` to your Unity Project's ```Assets/.../Plugins/WSA/ARM64/``` folder
-4. Copy the contents of the ```UnityBindings/``` folder to your Unity Project's ```Assets/.../Scripts``` folder
-5. Setup scene like the scene included in the sample: https://github.com/andreaskeller96/HoloLens2-IRTracking-Sample/
+2. Open ```HL2IRToolTracking.vcxproj``` using Visual Studio
+3. Set the build target to ```Release``` and the target architecture to ```ARM64```
+4. Save the solution
+5. Build the solution
+6. Copy ```Out/HL2IRToolTracking.winmd``` and ```HL2IRToolTracking.dll``` to your Unity Project's ```Assets/.../Plugins/WSA/ARM64/``` folder
+7. Copy the contents of the ```UnityBindings/``` folder to your Unity Project's ```Assets/.../Scripts``` folder
+8. Setup scene like the scene included in the sample: https://github.com/andreaskeller96/HoloLens2-IRTracking-Sample/
+9. Make sure to enable Research Mode on your HoloLens 2 device
+10. Build the project in Unity
+11. Open the resulting solution in Visual Studio
+12. Build and run the solution in ```Release``` mode on ```ARM64``` architecture, and deploy to ```Remote Device```, setting the device name or ip address in the debug settings
 
 
 ## Thanks
-Special thanks to Wenhao Gu for his hololens plugin project that this dll is based on: https://github.com/petergu684/HoloLens2-ResearchMode-Unity
-This project also makes heavy use of opencv and the open source libraries included therein
+Special thanks to Wenhao Gu for his hololens plugin project that served as a basis for this project: https://github.com/petergu684/HoloLens2-ResearchMode-Unity
+This project also makes heavy use of opencv and the open source libraries included therein.
 
 
 ## License and Citation
 
-If you use this project, please cite the following BibTeX entries:
+This project is provided under MIT license.
+
+If you use this project or create your own derivatives, please cite the following BibTeX entries:
 
 ```BibTeX
 @misc{keller2023hl2irtracking,
