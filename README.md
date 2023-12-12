@@ -34,6 +34,7 @@ Check out the Unity Sample application provided here: https://github.com/andreas
 
 ## Thanks
 Special thanks to Wenhao Gu for his hololens plugin project that served as a basis for this project: https://github.com/petergu684/HoloLens2-ResearchMode-Unity
+
 This project also makes heavy use of opencv and the open source libraries included therein.
 
 
