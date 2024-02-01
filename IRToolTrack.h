@@ -40,11 +40,12 @@ public:
 	inline bool IsTracking() { return m_bIsCurrentlyTracking; }
 
 	cv::Mat GetToolTransform(std::string identifier);
-	void TrackTools();
+	
 
 
 private:
 
+	void TrackTools();
 	bool ProcessFrame(AHATFrame* rawFrame, ProcessedAHATFrame& result);
 	
 	void TrackTool(IRTrackedTool &tool, ProcessedAHATFrame &frame, ToolResultContainer &result);
