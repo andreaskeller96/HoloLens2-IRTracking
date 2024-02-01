@@ -83,7 +83,7 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
     <OutDir>.\Out\</OutDir>
-    <IncludePath>$(SolutionDir)\Eigen;$(SolutionDir)\OpenCV\include;$(IncludePath)</IncludePath>
+    <IncludePath>$(SolutionDir)\OpenCV\include;$(IncludePath)</IncludePath>
     <LibraryPath>$(SolutionDir)\OpenCV\lib\ARM64\Release\;$(SolutionDir)\OpenCV\3rdparty\lib\ARM64\Release\;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <ItemDefinitionGroup>

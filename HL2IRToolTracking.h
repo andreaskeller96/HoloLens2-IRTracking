@@ -27,7 +27,6 @@
 #include <opencv2/core/mat.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/imgcodecs/imgcodecs.hpp>
-#include <Eigen/Eigen>
 
 #include "IRToolTrack.h"
 
